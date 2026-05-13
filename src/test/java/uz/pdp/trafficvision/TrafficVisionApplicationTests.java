@@ -9,5 +9,4 @@ class TrafficVisionApplicationTests {
     @Test
     void contextLoads() {
     }
-
 }

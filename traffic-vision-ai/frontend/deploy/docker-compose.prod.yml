@@ -1,0 +1,10 @@
+services:
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    container_name: traffic-vision-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
