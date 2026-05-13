@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Configuration
@@ -32,19 +33,24 @@ public class OpenApiConfig {
     @Bean
     public OpenAPI openAPI() {
         String securitySchemeName = "bearerAuth";
-        return new OpenAPI()
+        OpenAPI openAPI = new OpenAPI()
                 .info(new Info()
                         .title(title)
                         .version(version)
                         .description(description))
-                .servers(List.of(new Server()
-                        .url(serverUrl)
-                        .description(serverDescription)))
                 .addSecurityItem(new SecurityRequirement().addList(securitySchemeName))
                 .schemaRequirement(securitySchemeName, new SecurityScheme()
                         .name(securitySchemeName)
                         .type(SecurityScheme.Type.HTTP)
                         .scheme("bearer")
                         .bearerFormat("JWT"));
+
+        if (serverUrl != null && !serverUrl.isBlank()) {
+            openAPI.servers(new ArrayList<>(List.of(new Server()
+                    .url(serverUrl)
+                    .description(serverDescription))));
+        }
+
+        return openAPI;
     }
 }
