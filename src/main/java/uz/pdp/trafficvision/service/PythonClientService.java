@@ -1,14 +1,10 @@
 package uz.pdp.trafficvision.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.*;
 import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -16,12 +12,26 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import uz.pdp.trafficvision.exception.FileStorageException;
+import uz.pdp.trafficvision.model.dto.python.PythonApiResponse;
 import uz.pdp.trafficvision.model.dto.python.PythonDetectionResult;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
+/**
+ * Python FastAPI AI servisiga so'rov yuboruvchi mijoz.
+ *
+ * Python /detect endpointi quyidagi formatda javob qaytaradi:
+ * {
+ *   "signs": [...],
+ *   "total_signs": N,
+ *   "processing_time_ms": 45.3,
+ *   "model_version": "yolov8n",
+ *   "image_size": [640, 480]
+ * }
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PythonClientService {
@@ -31,61 +41,82 @@ public class PythonClientService {
     @Value("${python.api.url}")
     private String pythonApiUrl;
 
+    /**
+     * Rasmni Python AI servisiga yuboradi va aniqlangan belgilar ro'yxatini qaytaradi.
+     *
+     * @param file yuklangan rasm yoki video frame
+     * @return aniqlangan yo'l belgilari ro'yxati (description bilan)
+     * @throws FileStorageException Python servisi bilan bog'lanishda xato bo'lsa
+     */
     public List<PythonDetectionResult> detect(MultipartFile file) {
         try {
-            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-            body.add("file", createFileResource(file));
+            HttpEntity<MultiValueMap<String, Object>> requestEntity = buildMultipartRequest(file);
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
-
-            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
-            ResponseEntity<List<Map<String, Object>>> response = restTemplate.exchange(
+            ResponseEntity<PythonApiResponse> response = restTemplate.exchange(
                     pythonApiUrl + "/detect",
                     HttpMethod.POST,
                     requestEntity,
-                    new ParameterizedTypeReference<>() {
-                    }
+                    PythonApiResponse.class
             );
 
-            List<Map<String, Object>> results = response.getBody();
-            if (results == null) {
-                return List.of();
+            PythonApiResponse body = response.getBody();
+            if (body == null || body.getSigns() == null) {
+                log.warn("Python servisi bo'sh javob qaytardi");
+                return Collections.emptyList();
             }
 
-            return results.stream()
-                    .map(this::mapToPythonDetectionResult)
-                    .toList();
-        } catch (IOException | RestClientException exception) {
-            throw new FileStorageException("Could not process image with Python detection service");
+            log.debug("Python aniqladi: {} ta belgi, {} ms",
+                    body.getTotalSigns(), body.getProcessingTimeMs());
+            return body.getSigns();
+
+        } catch (IOException e) {
+            log.error("Fayl o'qishda xato: {}", e.getMessage());
+            throw new FileStorageException("Fayl o'qib bo'lmadi: " + e.getMessage());
+        } catch (RestClientException e) {
+            log.error("Python AI servisi bilan bog'lanishda xato: {}", e.getMessage());
+            throw new FileStorageException("AI servisi bilan bog'lanib bo'lmadi. Python server ishga tushganmi?");
         }
     }
 
+    /**
+     * Python AI servisining holatini tekshiradi.
+     *
+     * @return true — server ishlayapti va model yuklangan
+     */
+    public boolean isAiServiceHealthy() {
+        try {
+            ResponseEntity<String> response = restTemplate.getForEntity(
+                    pythonApiUrl + "/health",
+                    String.class
+            );
+            return response.getStatusCode().is2xxSuccessful();
+        } catch (Exception e) {
+            log.warn("Python AI health check muvaffaqiyatsiz: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private HttpEntity<MultiValueMap<String, Object>> buildMultipartRequest(MultipartFile file) throws IOException {
+        MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+        body.add("file", createFileResource(file));
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+
+        return new HttpEntity<>(body, headers);
+    }
+
     private ByteArrayResource createFileResource(MultipartFile file) throws IOException {
-        return new ByteArrayResource(file.getBytes()) {
+        byte[] bytes = file.getBytes();
+        String filename = file.getOriginalFilename() != null
+                ? file.getOriginalFilename()
+                : "frame.jpg";
+
+        return new ByteArrayResource(bytes) {
             @Override
             public String getFilename() {
-                return file.getOriginalFilename();
+                return filename;
             }
         };
-    }
-
-    private PythonDetectionResult mapToPythonDetectionResult(Map<String, Object> map) {
-        return PythonDetectionResult.builder()
-                .signType((String) map.get("sign_type"))
-                .confidence(toDouble(map.get("confidence")))
-                .x(toInteger(map.get("x")))
-                .y(toInteger(map.get("y")))
-                .width(toInteger(map.get("width")))
-                .height(toInteger(map.get("height")))
-                .build();
-    }
-
-    private Double toDouble(Object value) {
-        return value == null ? null : ((Number) value).doubleValue();
-    }
-
-    private Integer toInteger(Object value) {
-        return value == null ? null : ((Number) value).intValue();
     }
 }

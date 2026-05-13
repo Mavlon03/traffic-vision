@@ -1,16 +1,17 @@
+import base64
 import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.detector import detector
 from app.preprocessor import validate_file_extension
-from app.schemas import DetectionResponse, ErrorResponse, HealthResponse
+from app.schemas import DetectionResponse, ErrorResponse, HealthResponse, VideoFrameResponse
 
 logging.basicConfig(level=settings.log_level.upper())
 logger = logging.getLogger(__name__)
@@ -36,14 +37,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Traffic Vision AI",
-    description="Yo'l harakati belgilarini aniqlash API",
-    version="1.0.0",
+    description="Yo'l harakati belgilarini real vaqtda aniqlash API",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:8080", "http://localhost:3000"],
+    allow_origins=["http://localhost:8080", "http://localhost:3000", "*"],
     allow_methods=["POST", "GET"],
     allow_headers=["*"],
 )
@@ -74,6 +75,8 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     return JSONResponse(status_code=exc.status_code, content=error_response.model_dump())
 
 
+# ─── Health ────────────────────────────────────────────────────────────────────
+
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     model_loaded = detector.is_ready()
@@ -81,9 +84,11 @@ async def health() -> HealthResponse:
         status="ok" if model_loaded else "model_not_loaded",
         model_loaded=model_loaded,
         model_path=settings.model_path,
-        version="1.0.0",
+        version="2.0.0",
     )
 
+
+# ─── Rasm yuklash orqali aniqlash (mavjud) ─────────────────────────────────────
 
 @app.post("/detect", response_model=DetectionResponse)
 async def detect(file: UploadFile = File(...)) -> DetectionResponse:
@@ -124,9 +129,101 @@ async def detect(file: UploadFile = File(...)) -> DetectionResponse:
     )
 
 
+# ─── Video frame (base64) orqali real-time aniqlash ────────────────────────────
+
+@app.post("/detect/frame", response_model=VideoFrameResponse)
+async def detect_frame(file: UploadFile = File(...), frame_id: int = 0) -> VideoFrameResponse:
+    """
+    Kamera frame'ini yuborish orqali real-time aniqlash.
+    Natijada has_critical_sign = True bo'lsa, frontend ovozli bildirishnoma chiqaradi.
+    """
+    if not detector.is_ready():
+        raise HTTPException(status_code=503, detail="AI model hali yuklanmagan")
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Frame bo'sh")
+
+    try:
+        result = detector.detect_from_base64_frame(file_bytes, frame_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error("Frame detection xatosi: %s", e)
+        raise HTTPException(status_code=500, detail="Frame aniqlashda xato") from e
+
+    return result
+
+
+# ─── WebSocket: Real-time kamera stream ────────────────────────────────────────
+
+@app.websocket("/ws/detect")
+async def websocket_detect(websocket: WebSocket):
+    """
+    WebSocket orqali real-time kamera oqimi.
+
+    Protokol:
+      Mijoz -> Server:  JSON { "frame": "<base64 encoded JPEG>", "frame_id": 0 }
+      Server -> Mijoz:  JSON VideoFrameResponse (has_critical_sign, signs, descriptions...)
+
+    Frontend bu natijaga asoslanib:
+      1. Aniqlangan belgilarni ekranda ko'rsatadi
+      2. has_critical_sign = true bo'lsa Web Speech API orqali ovozli bildirishnoma beradi
+    """
+    await websocket.accept()
+    logger.info("WebSocket ulanish qabul qilindi: %s", websocket.client)
+
+    if not detector.is_ready():
+        await websocket.send_json({"error": "AI model yuklanmagan"})
+        await websocket.close(code=1013)
+        return
+
+    frame_counter = 0
+    try:
+        while True:
+            data = await websocket.receive_json()
+
+            frame_b64 = data.get("frame")
+            frame_id = data.get("frame_id", frame_counter)
+
+            if not frame_b64:
+                await websocket.send_json({"error": "frame maydoni bo'sh"})
+                continue
+
+            # Base64 -> bytes -> numpy frame
+            try:
+                frame_bytes = base64.b64decode(frame_b64)
+                result = detector.detect_from_base64_frame(frame_bytes, frame_id)
+                await websocket.send_json(result.model_dump())
+            except Exception as e:
+                logger.warning("Frame qayta ishlashda xato: %s", e)
+                await websocket.send_json({
+                    "error": str(e),
+                    "frame_id": frame_id,
+                })
+
+            frame_counter += 1
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket ulanish uzildi: %s", websocket.client)
+    except Exception as e:
+        logger.error("WebSocket xatosi: %s", e)
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
+
+
+# ─── Root ──────────────────────────────────────────────────────────────────────
+
 @app.get("/")
 async def root() -> dict[str, str]:
-    return {"message": "Traffic Vision AI Server", "docs": "/docs"}
+    return {
+        "message": "Traffic Vision AI Server v2.0",
+        "docs": "/docs",
+        "websocket": "/ws/detect",
+        "frame_detect": "/detect/frame",
+    }
 
 
 if __name__ == "__main__":

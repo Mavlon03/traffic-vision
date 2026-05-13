@@ -1,0 +1,11 @@
+path: ./dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: stop
+  1: give_way
+  2: no_entry
+  3: children
+  4: parking

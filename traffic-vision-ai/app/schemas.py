@@ -8,6 +8,7 @@ class DetectedSign(BaseModel):
     y: int = Field(ge=0)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
+    description: str = ""  # ovozli bildirishnoma uchun
 
 
 class DetectionResponse(BaseModel):
@@ -16,6 +17,16 @@ class DetectionResponse(BaseModel):
     processing_time_ms: float
     model_version: str = "yolov8n"
     image_size: tuple[int, int]
+
+
+class VideoFrameResponse(BaseModel):
+    """Real-time video frame detection natijasi"""
+    signs: list[DetectedSign]
+    total_signs: int
+    processing_time_ms: float
+    frame_id: int = 0
+    has_critical_sign: bool = False  # bildirishnoma kerakmi?
+    critical_sign_types: list[str] = []  # qaysi belgilar muhim?
 
 
 class ErrorResponse(BaseModel):

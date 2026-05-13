@@ -4,3 +4,6 @@ __pycache__/
 .env
 uploads/
 .tmp/
+runs/
+dataset/raw/
+dataset/exports/

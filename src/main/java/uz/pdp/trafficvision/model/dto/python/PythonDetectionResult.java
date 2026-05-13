@@ -24,4 +24,7 @@ public class PythonDetectionResult {
     private Integer width;
 
     private Integer height;
+
+    /** O'zbek tilidagi tavsif — ovozli bildirishnoma uchun */
+    private String description;
 }

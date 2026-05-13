@@ -18,4 +18,7 @@ public interface DetectedSignRepository extends JpaRepository<DetectedSign, Long
             ORDER BY COUNT(ds) DESC
             """)
     List<Object[]> findTopSignsByUserId(@Param("userId") Long userId);
+
+    @Query("select count(ds) from DetectedSign ds where ds.detection.user.id = :userId")
+    long countByDetectionUserId(@Param("userId") Long userId);
 }

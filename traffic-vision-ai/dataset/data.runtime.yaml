@@ -1,0 +1,21 @@
+path: C:/Users/Mavlon/IdeaProjects/traffic-vision/traffic-vision-ai/dataset
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: stop
+  1: give_way
+  2: no_entry
+  3: speed_20
+  4: speed_30
+  5: speed_40
+  6: speed_50
+  7: speed_60
+  8: pedestrian_crossing
+  9: children
+  10: parking
+  11: no_parking
+  12: u_turn_prohibited
+  13: turn_left_prohibited
+  14: turn_right_prohibited
