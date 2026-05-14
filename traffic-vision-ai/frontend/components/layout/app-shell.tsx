@@ -10,6 +10,7 @@ import type { User } from "@/types";
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/detect", label: "Detect" },
+  { href: "/live", label: "Live" },
   { href: "/history", label: "History" },
 ];
 
