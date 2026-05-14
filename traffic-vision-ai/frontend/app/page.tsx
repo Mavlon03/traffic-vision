@@ -7,6 +7,7 @@ const checkpoints = [
   "FastAPI YOLOv8 inference tayyor",
   "JWT bilan protected route oqimi tayyor",
   "Image upload orqali detection sahifasi tayyor",
+  "Telefon kamera uchun live detection va voice alert qo'shildi",
 ];
 
 export default function Home() {

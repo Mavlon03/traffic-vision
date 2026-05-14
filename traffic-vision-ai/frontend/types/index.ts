@@ -21,6 +21,12 @@ export interface DetectionResponse {
   createdAt?: string;
 }
 
+export interface LiveDetectionResponse extends DetectionResponse {
+  frameId?: number;
+  hasCriticalSign?: boolean;
+  criticalSignTypes?: string[];
+}
+
 export interface AuthResponse {
   token: string;
   tokenType: string;

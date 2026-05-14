@@ -9,6 +9,11 @@ const cards = [
     href: "/detect",
   },
   {
+    title: "Live Mobile Mode",
+    description: "Telefon kamerasi orqali realtime detection va ovozli alert.",
+    href: "/live",
+  },
+  {
     title: "Detection History",
     description: "Java backend saqlagan detection yozuvlarini ko'ring.",
     href: "/history",
@@ -36,7 +41,7 @@ export default function DashboardPage() {
         </p>
       </section>
 
-      <section className="mt-6 grid gap-6 md:grid-cols-3">
+      <section className="mt-6 grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         {cards.map((card) => (
           <Link
             key={card.title}
