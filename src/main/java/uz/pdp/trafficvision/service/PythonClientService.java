@@ -13,10 +13,10 @@ import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import uz.pdp.trafficvision.exception.FileStorageException;
 import uz.pdp.trafficvision.model.dto.python.PythonApiResponse;
+import uz.pdp.trafficvision.model.dto.python.PythonDetectionResponse;
 import uz.pdp.trafficvision.model.dto.python.PythonDetectionResult;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -48,7 +48,7 @@ public class PythonClientService {
      * @return aniqlangan yo'l belgilari ro'yxati (description bilan)
      * @throws FileStorageException Python servisi bilan bog'lanishda xato bo'lsa
      */
-    public List<PythonDetectionResult> detect(MultipartFile file) {
+    public PythonDetectionResponse detect(MultipartFile file) {
         try {
             HttpEntity<MultiValueMap<String, Object>> requestEntity = buildMultipartRequest(file);
 
@@ -62,12 +62,16 @@ public class PythonClientService {
             PythonApiResponse body = response.getBody();
             if (body == null || body.getSigns() == null) {
                 log.warn("Python servisi bo'sh javob qaytardi");
-                return Collections.emptyList();
+                return new PythonDetectionResponse(List.of(), 0D, "yolov8n");
             }
 
             log.debug("Python aniqladi: {} ta belgi, {} ms",
                     body.getTotalSigns(), body.getProcessingTimeMs());
-            return body.getSigns();
+            return new PythonDetectionResponse(
+                    body.getSigns(),
+                    body.getProcessingTimeMs() != null ? body.getProcessingTimeMs() : 0D,
+                    body.getModelVersion() != null ? body.getModelVersion() : "yolov8n"
+            );
 
         } catch (IOException e) {
             log.error("Fayl o'qishda xato: {}", e.getMessage());
