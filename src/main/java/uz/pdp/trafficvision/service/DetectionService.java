@@ -12,6 +12,7 @@ import uz.pdp.trafficvision.exception.ResourceNotFoundException;
 import uz.pdp.trafficvision.model.dto.detection.DetectedSignDto;
 import uz.pdp.trafficvision.model.dto.detection.DetectionResponse;
 import uz.pdp.trafficvision.model.dto.notification.DetectionNotification;
+import uz.pdp.trafficvision.model.dto.python.PythonDetectionResponse;
 import uz.pdp.trafficvision.model.dto.python.PythonDetectionResult;
 import uz.pdp.trafficvision.model.entity.DetectedSign;
 import uz.pdp.trafficvision.model.entity.Detection;
@@ -68,8 +69,8 @@ public class DetectionService {
             detection.setStatus(DetectionStatus.PROCESSING);
             detection = detectionRepository.save(detection);
 
-            long startTime = System.currentTimeMillis();
-            List<PythonDetectionResult> results = pythonClientService.detect(file);
+            PythonDetectionResponse pythonResponse = pythonClientService.detect(file);
+            List<PythonDetectionResult> results = pythonResponse.getSigns();
 
             Detection finalDetection = detection;
             List<DetectedSign> detectedSigns = results.stream()
@@ -79,7 +80,7 @@ public class DetectionService {
             detection.getDetectedSigns().clear();
             detection.getDetectedSigns().addAll(detectedSigns);
 
-            detection.setProcessingTimeMs(System.currentTimeMillis() - startTime);
+            detection.setProcessingTimeMs(Math.round(pythonResponse.getProcessingTimeMs()));
             detection.setStatus(DetectionStatus.COMPLETED);
             Detection saved = detectionRepository.save(detection);
 
