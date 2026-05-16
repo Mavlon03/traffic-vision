@@ -15,9 +15,23 @@ const API_BASE_URL =
 const LIVE_WS_URL =
   process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:5000/ws/detect";
 
-const LIVE_API_BASE_URL =
-  process.env.NEXT_PUBLIC_AI_API_BASE_URL ??
-  LIVE_WS_URL.replace(/^ws/i, "http").replace(/\/ws\/detect\/?$/, "");
+function getLiveApiBaseUrl() {
+  if (process.env.NEXT_PUBLIC_AI_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_AI_API_BASE_URL;
+  }
+
+  if (/\/ws\/detect\/?$/.test(LIVE_WS_URL)) {
+    return LIVE_WS_URL.replace(/^ws/i, "http").replace(/\/ws\/detect\/?$/, "");
+  }
+
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL;
+  }
+
+  return "http://localhost:5000";
+}
+
+const LIVE_API_BASE_URL = getLiveApiBaseUrl();
 
 type RawDetectedSign = {
   id?: number;
