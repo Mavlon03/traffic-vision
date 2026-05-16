@@ -24,6 +24,10 @@ public class DetectionResponse {
 
     private Long processingTimeMs;
 
+    private String modelVersion;
+
+    private List<Integer> imageSize;
+
     private LocalDateTime createdAt;
 
     public Integer getTotalSigns() {

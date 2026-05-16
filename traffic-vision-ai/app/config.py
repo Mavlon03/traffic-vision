@@ -3,6 +3,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_path: str = "models/yolov8n.pt"
+    models_dir: str = "models"
+    model_registry_path: str = "models/registry.json"
     confidence_threshold: float = 0.45
     iou_threshold: float = 0.45
     max_image_size: int = 1280

@@ -3,6 +3,8 @@ import type {
   DetectionResponse,
   LiveDetectionResponse,
   LoginRequest,
+  ManagedModel,
+  ModelRegistryResponse,
   RegisterRequest,
 } from "@/types";
 import { clearAuth, getToken } from "@/lib/auth";
@@ -56,9 +58,30 @@ type RawLiveDetectionResponse = RawDetectionResponse & {
 };
 
 type RequestOptions = {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: BodyInit | null;
   headers?: Record<string, string>;
+};
+
+type RawManagedModel = {
+  name: string;
+  path: string;
+  size_bytes?: number;
+  sizeBytes?: number;
+  created_at?: string;
+  createdAt?: string;
+  is_primary?: boolean;
+  isPrimary?: boolean;
+  is_fallback?: boolean;
+  isFallback?: boolean;
+};
+
+type RawModelRegistryResponse = {
+  primary_model?: string;
+  primaryModel?: string;
+  fallback_models?: string[];
+  fallbackModels?: string[];
+  models?: RawManagedModel[];
 };
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -127,6 +150,27 @@ function normalizeDetectedSign(sign: RawDetectedSign) {
     width: sign.width,
     height: sign.height,
     description: sign.description,
+  };
+}
+
+function normalizeManagedModel(model: RawManagedModel): ManagedModel {
+  return {
+    name: model.name,
+    path: model.path,
+    sizeBytes: model.sizeBytes ?? model.size_bytes ?? 0,
+    createdAt: model.createdAt ?? model.created_at ?? "",
+    isPrimary: model.isPrimary ?? model.is_primary ?? false,
+    isFallback: model.isFallback ?? model.is_fallback ?? false,
+  };
+}
+
+function normalizeModelRegistryResponse(
+  payload: RawModelRegistryResponse,
+): ModelRegistryResponse {
+  return {
+    primaryModel: payload.primaryModel ?? payload.primary_model ?? "",
+    fallbackModels: payload.fallbackModels ?? payload.fallback_models ?? [],
+    models: (payload.models ?? []).map(normalizeManagedModel),
   };
 }
 
@@ -232,5 +276,46 @@ export const detectionApi = {
     );
 
     return normalizeLiveDetectionResponse(response);
+  },
+};
+
+export const modelApi = {
+  getRegistry: async () => {
+    const response = await publicRequest<RawModelRegistryResponse>(
+      `${LIVE_API_BASE_URL}/models`,
+    );
+    return normalizeModelRegistryResponse(response);
+  },
+  upload: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    await publicRequest(`${LIVE_API_BASE_URL}/models/upload`, {
+      method: "POST",
+      body: formData,
+    });
+  },
+  setPrimary: async (name: string) => {
+    await publicRequest(`${LIVE_API_BASE_URL}/models/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ set_as_primary: true, use_as_fallback: false }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  },
+  setFallback: async (name: string, enabled: boolean) => {
+    await publicRequest(`${LIVE_API_BASE_URL}/models/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ use_as_fallback: enabled }),
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  },
+  remove: async (name: string) => {
+    await publicRequest(`${LIVE_API_BASE_URL}/models/${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    });
   },
 };

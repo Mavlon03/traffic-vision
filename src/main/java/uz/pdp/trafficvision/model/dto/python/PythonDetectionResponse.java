@@ -14,4 +14,6 @@ public class PythonDetectionResponse {
     private double processingTimeMs;
 
     private String modelVersion;
+
+    private List<Integer> imageSize;
 }

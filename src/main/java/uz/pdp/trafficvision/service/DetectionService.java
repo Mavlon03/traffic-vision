@@ -86,6 +86,8 @@ public class DetectionService {
 
             // WebSocket orqali real-time bildirishnoma yuborish
             DetectionResponse response = mapToResponse(saved);
+            response.setModelVersion(pythonResponse.getModelVersion());
+            response.setImageSize(pythonResponse.getImageSize());
             sendWebSocketNotification(currentUser.getId(), response, saved.getProcessingTimeMs());
 
             return response;
@@ -195,6 +197,8 @@ public class DetectionService {
                 .imageUrl(imageService.getImageUrl(detection.getImage().getFilePath()))
                 .detectedSigns(signs)
                 .processingTimeMs(detection.getProcessingTimeMs())
+                .modelVersion(null)
+                .imageSize(null)
                 .createdAt(detection.getCreatedAt())
                 .build();
     }

@@ -3,6 +3,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +12,16 @@ from fastapi.responses import JSONResponse
 from app.config import settings
 from app.detector import detector
 from app.preprocessor import validate_file_extension
-from app.schemas import DetectionResponse, ErrorResponse, HealthResponse, VideoFrameResponse
+from app.schemas import (
+    DetectionResponse,
+    ErrorResponse,
+    HealthResponse,
+    ManagedModel,
+    ModelOperationResponse,
+    ModelRegistryResponse,
+    ModelUpdateRequest,
+    VideoFrameResponse,
+)
 
 logging.basicConfig(level=settings.log_level.upper())
 logger = logging.getLogger(__name__)
@@ -80,10 +90,16 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     model_loaded = detector.is_ready()
+    current_model_path = settings.model_path
+    if model_loaded:
+        try:
+            current_model_path = detector.get_current_model()["path"]
+        except Exception:
+            current_model_path = settings.model_path
     return HealthResponse(
         status="ok" if model_loaded else "model_not_loaded",
         model_loaded=model_loaded,
-        model_path=settings.model_path,
+        model_path=current_model_path,
         version="2.0.0",
     )
 
@@ -113,7 +129,7 @@ async def detect(file: UploadFile = File(...)) -> DetectionResponse:
         raise HTTPException(status_code=413, detail="Fayl juda katta (max 10MB)")
 
     try:
-        signs, processing_time, image_size = detector.detect(file_bytes)
+        signs, processing_time, image_size, matched_model, matched_by = detector.detect(file_bytes)
     except ValueError as exception:
         raise HTTPException(status_code=400, detail=str(exception)) from exception
     except Exception as exception:
@@ -124,9 +140,101 @@ async def detect(file: UploadFile = File(...)) -> DetectionResponse:
         signs=signs,
         total_signs=len(signs),
         processing_time_ms=round(processing_time, 2),
-        model_version="yolov8n",
+        model_version=matched_model,
         image_size=image_size,
+        matched_by=matched_by,
     )
+
+
+@app.get("/models", response_model=ModelRegistryResponse)
+async def get_models() -> ModelRegistryResponse:
+    registry = detector.list_models()
+    return ModelRegistryResponse(
+        primary_model=registry["primary_model"],
+        fallback_models=registry["fallback_models"],
+        models=[ManagedModel(**model) for model in registry["models"]],
+    )
+
+
+@app.get("/models/current", response_model=ManagedModel)
+async def get_current_model() -> ManagedModel:
+    current = detector.get_current_model()
+    return ManagedModel(**current)
+
+
+@app.post("/models/upload", response_model=ModelOperationResponse)
+async def upload_model(file: UploadFile = File(...)) -> ModelOperationResponse:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Model fayli tanlanmagan")
+
+    filename = Path(file.filename).name
+    if not filename.lower().endswith(".pt"):
+        raise HTTPException(status_code=415, detail="Faqat .pt model fayllari qabul qilinadi")
+
+    target_dir = Path(settings.models_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_path = target_dir / filename
+
+    if target_path.exists():
+        raise HTTPException(status_code=409, detail=f"{filename} allaqachon mavjud")
+
+    file_bytes = await file.read()
+    if len(file_bytes) == 0:
+        raise HTTPException(status_code=400, detail="Model fayli bo'sh")
+
+    try:
+        target_path.write_bytes(file_bytes)
+        detector.validate_model(str(target_path))
+        created = detector.add_model(filename)
+    except FileExistsError as exception:
+        if target_path.exists():
+            target_path.unlink()
+        raise HTTPException(status_code=409, detail=str(exception)) from exception
+    except Exception as exception:
+        if target_path.exists():
+            target_path.unlink()
+        logger.error("Model yuklashda xato: %s", exception)
+        raise HTTPException(status_code=500, detail="Modelni saqlab bo'lmadi") from exception
+
+    return ModelOperationResponse(
+        detail="Model muvaffaqiyatli yuklandi",
+        model=ManagedModel(**created),
+    )
+
+
+@app.patch("/models/{model_name}", response_model=ModelOperationResponse)
+async def update_model(model_name: str, payload: ModelUpdateRequest) -> ModelOperationResponse:
+    try:
+        updated = detector.update_model(
+            name=model_name,
+            set_as_primary=payload.set_as_primary,
+            use_as_fallback=payload.use_as_fallback,
+        )
+    except FileNotFoundError as exception:
+        raise HTTPException(status_code=404, detail=str(exception)) from exception
+    except Exception as exception:
+        logger.error("Model yangilashda xato: %s", exception)
+        raise HTTPException(status_code=500, detail="Modelni yangilab bo'lmadi") from exception
+
+    return ModelOperationResponse(
+        detail="Model sozlamasi yangilandi",
+        model=ManagedModel(**updated),
+    )
+
+
+@app.delete("/models/{model_name}", response_model=ModelOperationResponse)
+async def delete_model(model_name: str) -> ModelOperationResponse:
+    try:
+        detector.delete_model(model_name)
+    except FileNotFoundError as exception:
+        raise HTTPException(status_code=404, detail=str(exception)) from exception
+    except ValueError as exception:
+        raise HTTPException(status_code=400, detail=str(exception)) from exception
+    except Exception as exception:
+        logger.error("Modelni o'chirishda xato: %s", exception)
+        raise HTTPException(status_code=500, detail="Modelni o'chirib bo'lmadi") from exception
+
+    return ModelOperationResponse(detail="Model o'chirildi")
 
 
 # ─── Video frame (base64) orqali real-time aniqlash ────────────────────────────

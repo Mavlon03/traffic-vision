@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from time import perf_counter
 
 import cv2
@@ -6,14 +7,13 @@ import numpy as np
 from ultralytics import YOLO
 
 from app.config import settings
+from app.model_registry import ModelRegistry
 from app.preprocessor import preprocess
 from app.schemas import DetectedSign, VideoFrameResponse
 
 logger = logging.getLogger(__name__)
 
-# Yo'l belgilarining o'zbek tilidagi tavsifi (ovozli bildirishnoma uchun)
 SIGN_DESCRIPTIONS: dict[str, str] = {
-    # Taqiqlovchi belgilar
     "stop": "To'xtang! STOP belgisi aniqlandi",
     "no_entry": "Kirish taqiqlangan",
     "no_overtaking": "Quvib o'tish taqiqlangan",
@@ -26,7 +26,6 @@ SIGN_DESCRIPTIONS: dict[str, str] = {
     "speed_limit_120": "Tezlik cheklovi: 120 km/soat",
     "no_parking": "To'xtatish taqiqlangan",
     "no_stopping": "To'xtab turish taqiqlangan",
-    # Ogohlantiruvchi belgilar
     "danger": "Diqqat! Xavf bor",
     "crossroads": "Kesishma yaqinlashmoqda",
     "pedestrian_crossing": "Piyodalar o'tish joyi",
@@ -38,19 +37,16 @@ SIGN_DESCRIPTIONS: dict[str, str] = {
     "road_works": "Yo'l ta'miri ishlari",
     "sharp_turn_left": "Keskin burilish chap tomonga",
     "sharp_turn_right": "Keskin burilish o'ng tomonga",
-    # Buyuruvchi belgilar
     "give_way": "Yo'l bering",
     "priority_road": "Ustunlik yo'li",
     "turn_left": "Chap tomonga buring",
     "turn_right": "O'ng tomonga buring",
     "go_straight": "To'g'ri boring",
-    # Axborot belgilari
     "parking": "To'xtash joyi",
     "hospital": "Kasalxona yaqinda",
     "fuel_station": "Yoqilg'i quyish stantsiyasi",
 }
 
-# Tezkor ogohlantirish talab etuvchi kritik belgilar
 CRITICAL_SIGNS: set[str] = {
     "stop",
     "no_entry",
@@ -64,67 +60,47 @@ CRITICAL_SIGNS: set[str] = {
 
 
 def get_sign_description(sign_type: str) -> str:
-    """Sign uchun o'zbek tilidagi tavsif qaytaradi."""
     key = sign_type.lower().replace(" ", "_").replace("-", "_")
     return SIGN_DESCRIPTIONS.get(key, f"Yo'l belgisi aniqlandi: {sign_type}")
 
 
 class TrafficSignDetector:
     def __init__(self) -> None:
-        self.model = None
-        self.model_path = settings.model_path
+        self.model_cache: dict[str, YOLO] = {}
+        self.registry = ModelRegistry(
+            models_dir=settings.models_dir,
+            registry_file=settings.model_registry_path,
+            default_model_path=settings.model_path,
+        )
         self.is_loaded = False
 
     def load_model(self) -> None:
-        if self.is_loaded and self.model is not None:
-            return
+        self.registry.ensure_initialized()
+        primary = self.registry.get_primary_model()
+        self._load_model_from_path(primary["path"])
+        self.is_loaded = True
+        logger.info("Primary model ready: %s", primary["name"])
 
-        try:
-            self.model = YOLO(self.model_path)
-            self.is_loaded = True
-            logger.info("YOLO model loaded from %s", self.model_path)
-        except Exception:
-            logger.exception("Failed to load YOLO model from %s", self.model_path)
-            raise
-
-    def detect(self, file_bytes: bytes) -> tuple[list[DetectedSign], float, tuple[int, int]]:
+    def detect(self, file_bytes: bytes) -> tuple[list[DetectedSign], float, tuple[int, int], str, str]:
         if not self.is_loaded:
             raise RuntimeError("Model yuklanmagan")
 
         start_time = perf_counter()
         processed_image, original_size = preprocess(file_bytes)
-
-        results = self.model.predict(
-            source=processed_image,
-            conf=settings.confidence_threshold,
-            iou=settings.iou_threshold,
-            verbose=False,
-        )
-
-        signs = self._parse_results(results)
+        signs, matched_model, matched_by = self._detect_with_fallback(processed_image)
         processing_time = (perf_counter() - start_time) * 1000
-        return signs, processing_time, original_size
+        return signs, processing_time, original_size, matched_model, matched_by
 
     def detect_frame(self, frame: np.ndarray, frame_id: int = 0) -> VideoFrameResponse:
-        """Video frame'ni real-time aniqlash (WebSocket uchun)."""
         if not self.is_loaded:
             raise RuntimeError("Model yuklanmagan")
 
         start_time = perf_counter()
-
-        results = self.model.predict(
-            source=frame,
-            conf=settings.confidence_threshold,
-            iou=settings.iou_threshold,
-            verbose=False,
-        )
-
-        signs = self._parse_results(results)
+        signs, _, _ = self._detect_with_fallback(frame)
         processing_time = (perf_counter() - start_time) * 1000
 
         critical_types = [
-            s.sign_type for s in signs
-            if s.sign_type.lower().replace(" ", "_") in CRITICAL_SIGNS
+            s.sign_type for s in signs if s.sign_type.lower().replace(" ", "_") in CRITICAL_SIGNS
         ]
 
         return VideoFrameResponse(
@@ -137,12 +113,80 @@ class TrafficSignDetector:
         )
 
     def detect_from_base64_frame(self, frame_bytes: bytes, frame_id: int = 0) -> VideoFrameResponse:
-        """Base64 decoded frame baytlaridan aniqlash."""
         img_array = np.frombuffer(frame_bytes, dtype=np.uint8)
         frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
         if frame is None:
             raise ValueError("Frame o'qib bo'lmadi")
         return self.detect_frame(frame, frame_id)
+
+    def list_models(self) -> dict:
+        self.registry.ensure_initialized()
+        return self.registry.list_models()
+
+    def get_current_model(self) -> dict:
+        self.registry.ensure_initialized()
+        return self.registry.get_primary_model()
+
+    def add_model(self, filename: str) -> dict:
+        self.registry.ensure_initialized()
+        return self.registry.add_model(filename)
+
+    def validate_model(self, model_path: str) -> None:
+        self._load_model_from_path(model_path)
+
+    def update_model(self, name: str, set_as_primary: bool | None, use_as_fallback: bool | None) -> dict:
+        self.registry.ensure_initialized()
+        updated = self.registry.update_model(name, set_as_primary, use_as_fallback)
+        if updated["is_primary"]:
+            self._load_model_from_path(updated["path"])
+        return updated
+
+    def delete_model(self, name: str) -> None:
+        self.registry.ensure_initialized()
+        model = self.registry.get_model(name)
+        self.registry.delete_model(name)
+        if model is not None:
+            self.model_cache.pop(model["path"], None)
+
+    def is_ready(self) -> bool:
+        return self.is_loaded
+
+    def _detect_with_fallback(self, source: np.ndarray) -> tuple[list[DetectedSign], str, str]:
+        candidates = self.registry.detection_order()
+        primary_name = candidates[0]["name"]
+
+        for index, model_meta in enumerate(candidates):
+            results = self._predict_with_model(source, model_meta["path"])
+            signs = self._parse_results(results)
+            if signs:
+                matched_by = "primary" if index == 0 else "fallback"
+                return signs, model_meta["name"], matched_by
+
+        return [], primary_name, "primary"
+
+    def _predict_with_model(self, source: np.ndarray, model_path: str):
+        model = self._load_model_from_path(model_path)
+        return model.predict(
+            source=source,
+            conf=settings.confidence_threshold,
+            iou=settings.iou_threshold,
+            verbose=False,
+        )
+
+    def _load_model_from_path(self, model_path: str) -> YOLO:
+        normalized = model_path.replace("\\", "/")
+        cached = self.model_cache.get(normalized)
+        if cached is not None:
+            return cached
+
+        resolved_path = Path(model_path)
+        if not resolved_path.is_absolute():
+            resolved_path = Path(model_path)
+
+        model = YOLO(str(resolved_path))
+        self.model_cache[normalized] = model
+        logger.info("YOLO model loaded from %s", resolved_path)
+        return model
 
     def _parse_results(self, results) -> list[DetectedSign]:
         signs: list[DetectedSign] = []
@@ -170,9 +214,6 @@ class TrafficSignDetector:
                     )
                 )
         return signs
-
-    def is_ready(self) -> bool:
-        return self.is_loaded
 
 
 detector = TrafficSignDetector()

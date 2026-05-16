@@ -5,16 +5,26 @@ import { useEffect, useState } from "react";
 import { detectionApi } from "@/lib/api";
 import type { DetectionResponse } from "@/types";
 
+const PAGE_SIZE = 10;
+
 export function HistoryTable() {
   const [rows, setRows] = useState<DetectionResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [page, setPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalElements, setTotalElements] = useState(0);
 
   useEffect(() => {
     async function loadHistory() {
+      setLoading(true);
+      setError("");
+
       try {
-        const response = await detectionApi.getHistory();
+        const response = await detectionApi.getHistory(page, PAGE_SIZE);
         setRows(response.content ?? []);
+        setTotalPages(response.totalPages ?? 0);
+        setTotalElements(response.totalElements ?? 0);
       } catch (historyError) {
         setError(
           historyError instanceof Error
@@ -27,7 +37,7 @@ export function HistoryTable() {
     }
 
     void loadHistory();
-  }, []);
+  }, [page]);
 
   if (loading) {
     return (
@@ -49,11 +59,17 @@ export function HistoryTable() {
     <div className="overflow-hidden rounded-[32px] border border-black/10 bg-white/85 shadow-xl backdrop-blur">
       <div className="border-b border-black/10 px-6 py-5">
         <p className="font-mono text-xs uppercase tracking-[0.35em] text-slate-500">
-          Detection History
+          Aniqlashlar tarixi
         </p>
         <h2 className="mt-2 font-heading text-3xl font-semibold">
           Saqlangan natijalar
         </h2>
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-slate-600">
+          <span>Jami yozuvlar: {totalElements}</span>
+          <span>
+            Sahifa: {totalPages === 0 ? 0 : page + 1} / {Math.max(totalPages, 1)}
+          </span>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -66,10 +82,10 @@ export function HistoryTable() {
             <thead className="bg-slate-100 text-slate-600">
               <tr>
                 <th className="px-6 py-4 font-medium">ID</th>
-                <th className="px-6 py-4 font-medium">Sign</th>
-                <th className="px-6 py-4 font-medium">Count</th>
-                <th className="px-6 py-4 font-medium">Confidence</th>
-                <th className="px-6 py-4 font-medium">Time</th>
+                <th className="px-6 py-4 font-medium">Belgi</th>
+                <th className="px-6 py-4 font-medium">Soni</th>
+                <th className="px-6 py-4 font-medium">Ishonchlilik</th>
+                <th className="px-6 py-4 font-medium">Vaqt</th>
                 <th className="px-6 py-4 font-medium">Model</th>
               </tr>
             </thead>
@@ -80,7 +96,7 @@ export function HistoryTable() {
                   <tr key={row.id ?? index} className="border-t border-black/5">
                     <td className="px-6 py-4 font-mono">{row.id ?? "-"}</td>
                     <td className="px-6 py-4">
-                      {topSign?.signType ?? "No sign"}
+                      {topSign?.signType ?? "Belgi topilmadi"}
                     </td>
                     <td className="px-6 py-4">{row.totalSigns}</td>
                     <td className="px-6 py-4 font-mono">
@@ -97,6 +113,40 @@ export function HistoryTable() {
           </table>
         </div>
       )}
+
+      {totalPages > 1 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-black/10 px-6 py-4">
+          <div className="text-sm text-slate-600">
+            {page * PAGE_SIZE + 1}-{Math.min((page + 1) * PAGE_SIZE, totalElements)} /{" "}
+            {totalElements} yozuv
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(current - 1, 0))}
+              disabled={page === 0}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Oldingi
+            </button>
+
+            <div className="rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700">
+              {page + 1}
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                setPage((current) => Math.min(current + 1, totalPages - 1))
+              }
+              disabled={page >= totalPages - 1}
+              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Keyingi
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
