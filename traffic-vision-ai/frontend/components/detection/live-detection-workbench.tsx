@@ -105,6 +105,7 @@ export function LiveDetectionWorkbench() {
   const frameIdRef = useRef(0);
   const memoryRef = useRef<Map<string, DetectionMemory>>(new Map());
   const overlaySizeRef = useRef<{ width: number; height: number } | null>(null);
+  const speechVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
   const [cameraState, setCameraState] = useState<
     "idle" | "ready" | "connecting" | "detecting" | "stopped"
@@ -179,6 +180,31 @@ export function LiveDetectionWorkbench() {
     setLastMeta("Camera toxtatildi.");
   }
 
+  function pickSpeechVoice(voices: SpeechSynthesisVoice[]) {
+    const normalizedVoices = voices.filter((voice) => voice.lang);
+
+    return (
+      normalizedVoices.find((voice) => voice.lang.toLowerCase() === "uz-uz") ??
+      normalizedVoices.find((voice) => voice.lang.toLowerCase().startsWith("uz")) ??
+      normalizedVoices.find((voice) => voice.lang.toLowerCase().startsWith("tr")) ??
+      normalizedVoices.find((voice) => voice.lang.toLowerCase().startsWith("ru")) ??
+      normalizedVoices.find((voice) => voice.lang.toLowerCase().startsWith("en")) ??
+      normalizedVoices[0] ??
+      null
+    );
+  }
+
+  function prepareSpeechVoice() {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      return null;
+    }
+
+    const voices = window.speechSynthesis.getVoices();
+    const selectedVoice = pickSpeechVoice(voices);
+    speechVoiceRef.current = selectedVoice;
+    return selectedVoice;
+  }
+
   function pushAlert(sign: DetectedSign) {
     const priority = getPriority(sign.signType);
     const alert: LiveAlert = {
@@ -194,9 +220,12 @@ export function LiveDetectionWorkbench() {
     setLastMeta(`${sign.signType} boyicha ogohlantirish chiqarildi.`);
 
     if (soundEnabled && typeof window !== "undefined" && "speechSynthesis" in window) {
+      const selectedVoice = speechVoiceRef.current ?? prepareSpeechVoice();
       window.speechSynthesis.cancel();
+      window.speechSynthesis.resume();
       const utterance = new SpeechSynthesisUtterance(alert.message);
-      utterance.lang = "uz-UZ";
+      utterance.lang = selectedVoice?.lang ?? "uz-UZ";
+      utterance.voice = selectedVoice;
       utterance.rate = priority === "high" ? 1 : 1.05;
       utterance.pitch = priority === "high" ? 0.9 : 1;
       window.speechSynthesis.speak(utterance);
@@ -398,7 +427,7 @@ export function LiveDetectionWorkbench() {
             | { error?: string }
             | Record<string, unknown>;
 
-          if ("error" in payload && payload.error) {
+          if ("error" in payload && typeof payload.error === "string" && payload.error) {
             setCameraError(payload.error);
             requestInFlightRef.current = false;
             setProcessing(false);
@@ -446,6 +475,24 @@ export function LiveDetectionWorkbench() {
       }
     });
   }
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      return;
+    }
+
+    prepareSpeechVoice();
+
+    const handleVoicesChanged = () => {
+      prepareSpeechVoice();
+    };
+
+    window.speechSynthesis.addEventListener("voiceschanged", handleVoicesChanged);
+
+    return () => {
+      window.speechSynthesis.removeEventListener("voiceschanged", handleVoicesChanged);
+    };
+  }, []);
 
   useEffect(() => {
     const mountedVideo = videoRef.current;
