@@ -17,6 +17,7 @@ class DetectionResponse(BaseModel):
     processing_time_ms: float
     model_version: str = "yolov8n"
     image_size: tuple[int, int]
+    matched_by: str = "primary"
 
 
 class VideoFrameResponse(BaseModel):
@@ -40,3 +41,28 @@ class HealthResponse(BaseModel):
     model_loaded: bool
     model_path: str
     version: str = "1.0.0"
+
+
+class ManagedModel(BaseModel):
+    name: str
+    path: str
+    size_bytes: int = 0
+    created_at: str
+    is_primary: bool = False
+    is_fallback: bool = False
+
+
+class ModelRegistryResponse(BaseModel):
+    primary_model: str
+    fallback_models: list[str]
+    models: list[ManagedModel]
+
+
+class ModelUpdateRequest(BaseModel):
+    set_as_primary: bool | None = None
+    use_as_fallback: bool | None = None
+
+
+class ModelOperationResponse(BaseModel):
+    detail: str
+    model: ManagedModel | None = None

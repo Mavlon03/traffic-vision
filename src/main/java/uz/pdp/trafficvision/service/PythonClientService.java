@@ -62,7 +62,7 @@ public class PythonClientService {
             PythonApiResponse body = response.getBody();
             if (body == null || body.getSigns() == null) {
                 log.warn("Python servisi bo'sh javob qaytardi");
-                return new PythonDetectionResponse(List.of(), 0D, "yolov8n");
+                return new PythonDetectionResponse(List.of(), 0D, "yolov8n", null);
             }
 
             log.debug("Python aniqladi: {} ta belgi, {} ms",
@@ -70,7 +70,8 @@ public class PythonClientService {
             return new PythonDetectionResponse(
                     body.getSigns(),
                     body.getProcessingTimeMs() != null ? body.getProcessingTimeMs() : 0D,
-                    body.getModelVersion() != null ? body.getModelVersion() : "yolov8n"
+                    body.getModelVersion() != null ? body.getModelVersion() : "yolov8n",
+                    body.getImageSize()
             );
 
         } catch (IOException e) {

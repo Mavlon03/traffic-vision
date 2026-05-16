@@ -1,0 +1,12 @@
+{
+  "primary_model": "yolov8n.pt",
+  "fallback_models": [],
+  "models": [
+    {
+      "name": "yolov8n.pt",
+      "path": "models/yolov8n.pt",
+      "size_bytes": 0,
+      "created_at": "2026-05-16T11:02:54.098527"
+    }
+  ]
+}

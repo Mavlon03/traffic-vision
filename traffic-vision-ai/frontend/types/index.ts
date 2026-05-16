@@ -52,3 +52,18 @@ export interface User {
   role: string;
   token: string;
 }
+
+export interface ManagedModel {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  createdAt: string;
+  isPrimary: boolean;
+  isFallback: boolean;
+}
+
+export interface ModelRegistryResponse {
+  primaryModel: string;
+  fallbackModels: string[];
+  models: ManagedModel[];
+}
